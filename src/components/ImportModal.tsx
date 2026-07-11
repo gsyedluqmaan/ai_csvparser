@@ -54,7 +54,9 @@ type ImportProgress = {
 
 type ModalStage = "preview" | "importing" | "result";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://ai-csvparser-backend.onrender.com";
 const AI_FAILURE_PREFIX = "AI processing failed:";
 
 const IMPORTED_COLUMNS: { key: keyof ImportedRecord; label: string }[] = [
