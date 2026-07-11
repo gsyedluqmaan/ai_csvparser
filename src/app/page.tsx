@@ -1,101 +1,220 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useDropzone } from "react-dropzone";
+import Papa from "papaparse";
+import { motion } from "framer-motion";
+import {
+  UploadCloud,
+  FileSpreadsheet,
+  ArrowRight,
+  Loader2,
+  Moon,
+  Sun,
+} from "lucide-react";
+import ImportModal, { type CsvRow } from "@/components/ImportModal";
+
+export default function CsvImporterPage() {
+  const [file, setFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [columns, setColumns] = useState<string[]>([]);
+  const [rows, setRows] = useState<CsvRow[]>([]);
+  const [parseError, setParseError] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  // Dark mode: toggled by class on <html>, so tailwind.config.js needs
+  // darkMode: 'class' for the dark: variants throughout this app to work.
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const prefersDark = window.matchMedia?.(
+      "(prefers-color-scheme: dark)",
+    ).matches;
+    const stored = localStorage.getItem("theme");
+    const shouldUseDark = stored ? stored === "dark" : prefersDark;
+    setIsDark(shouldUseDark);
+    document.documentElement.classList.toggle("dark", shouldUseDark);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      localStorage.setItem("theme", next ? "dark" : "light");
+      return next;
+    });
+  }, []);
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const selected = acceptedFiles[0];
+    if (!selected) return;
+
+    setParseError("");
+    setIsParsing(true);
+    setFileName(selected.name);
+    setFile(selected);
+
+    Papa.parse<CsvRow>(selected, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results: any) => {
+        const parsedRows = (results.data || []).filter((row: any) =>
+          Object.values(row).some((v) => String(v ?? "").trim() !== ""),
+        );
+        const detectedColumns =
+          results.meta.fields || Object.keys(parsedRows[0] || {});
+        setColumns(detectedColumns);
+        setRows(parsedRows);
+        setIsParsing(false);
+        setModalOpen(true);
+      },
+      error: (err: any) => {
+        setParseError(err.message || "Failed to parse CSV file.");
+        setColumns([]);
+        setRows([]);
+        setIsParsing(false);
+      },
+    });
+  }, []);
+
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    isDragReject,
+    open,
+    fileRejections,
+  } = useDropzone({
+    onDrop,
+    noClick: true,
+    multiple: false,
+    accept: { "text/csv": [".csv"], "application/vnd.ms-excel": [".csv"] },
+  });
+
+  const rejectionMessage = useMemo(() => {
+    if (!fileRejections.length) return "";
+    return (
+      fileRejections[0]?.errors?.[0]?.message || "Only CSV files are allowed."
+    );
+  }, [fileRejections]);
+
+  const resetAll = useCallback(() => {
+    setModalOpen(false);
+    setFile(null);
+    setFileName("");
+    setColumns([]);
+    setRows([]);
+  }, []);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <main className="min-h-screen bg-[#FAFAF9] text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
+      <button
+        onClick={toggleTheme}
+        aria-label="Toggle dark mode"
+        className="fixed right-4 top-4 z-40 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:text-slate-100 sm:right-6 sm:top-6"
+      >
+        {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      </button>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+      <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-20">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            CRM Lead Importer
+          </span>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 sm:text-4xl">
+            Any CSV. Same clean CRM.
+          </h1>
+          <p className="max-w-md text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
+            Drop a lead export from anywhere — Facebook, Google Ads, a
+            spreadsheet — and let AI map it to your schema.
+          </p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+
+        <div
+          {...getRootProps()}
+          className={`group w-full max-w-xl cursor-pointer rounded-2xl border-2 border-dashed bg-white p-8 text-center transition-all dark:bg-slate-900 sm:p-12 ${
+            isDragReject
+              ? "border-rose-300 bg-rose-50/50 dark:border-rose-500/40 dark:bg-rose-500/5"
+              : isDragActive
+                ? "border-emerald-400 bg-emerald-50/50 dark:border-emerald-500/50 dark:bg-emerald-500/5"
+                : "border-slate-200 hover:border-slate-300 hover:shadow-sm dark:border-slate-700 dark:hover:border-slate-600"
+          }`}
         >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          <input {...getInputProps()} />
+          <div className="mx-auto flex max-w-sm flex-col items-center gap-4">
+            <motion.div
+              animate={isDragActive ? { scale: 1.08 } : { scale: 1 }}
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-50 text-slate-400 ring-1 ring-slate-100 group-hover:text-emerald-500 dark:bg-slate-800 dark:text-slate-500 dark:ring-slate-700"
+            >
+              <UploadCloud className="h-6 w-6" strokeWidth={1.75} />
+            </motion.div>
+
+            <div className="space-y-1">
+              <p className="text-[15px] font-medium text-slate-800 dark:text-slate-200">
+                {isDragActive ? "Drop it here" : "Drag & drop your CSV"}
+              </p>
+              <p className="text-sm text-slate-400 dark:text-slate-500">
+                or click below to browse
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={open}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+            >
+              Choose file
+            </button>
+
+            {isParsing && (
+              <p className="flex items-center gap-1.5 text-sm text-slate-400 dark:text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading file…
+              </p>
+            )}
+            {parseError && (
+              <p className="text-sm text-rose-500 dark:text-rose-400">
+                {parseError}
+              </p>
+            )}
+            {rejectionMessage && (
+              <p className="text-sm text-rose-500 dark:text-rose-400">
+                {rejectionMessage}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {fileName && !modalOpen && (
+          <motion.button
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={() => setModalOpen(true)}
+            className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600 shadow-sm transition hover:border-slate-300 hover:shadow dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 sm:w-auto"
+          >
+            <FileSpreadsheet className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            <span className="truncate font-medium text-slate-800 dark:text-slate-200">
+              {fileName}
+            </span>
+            <span className="hidden text-slate-300 dark:text-slate-600 sm:inline">
+              ·
+            </span>
+            <span className="hidden sm:inline">{rows.length} rows</span>
+            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500 sm:ml-1" />
+          </motion.button>
+        )}
+      </div>
+
+      <ImportModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onReset={resetAll}
+        file={file}
+        fileName={fileName}
+        rows={rows}
+        columns={columns}
+      />
+    </main>
   );
 }
