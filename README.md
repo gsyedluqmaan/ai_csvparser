@@ -21,8 +21,8 @@ Upload any messy CSV lead export (Facebook Ads, Google Ads, a real-estate CRM, a
 
 ```
 frontend/
-  app/.../CsvImporterPage.jsx   # Upload page, dropzone, dark mode toggle
-  components/ImportModal.jsx   # Preview → importing → result modal, SSE consumer
+  app/Page.tsx   # Upload page, dropzone, dark mode toggle
+  components/ImportModal.tsx   # Preview → importing → result modal, SSE consumer
 
 backend/
   controllers/import.controller.js   # /api/import and /api/import/retry (SSE)
