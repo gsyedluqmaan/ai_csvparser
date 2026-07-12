@@ -23,16 +23,24 @@ export default function CsvImporterPage() {
   const [isParsing, setIsParsing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
-  // Dark mode: toggled by class on <html>, so tailwind.config.js needs
-  // darkMode: 'class' for the dark: variants throughout this app to work.
+  // Bumped every time a genuinely new file is loaded. Passed as ImportModal's
+  // React `key`, which forces a full unmount+remount of the modal — this is
+  // what actually resets its internal state (stage, result, retry flags,
+  // etc). Without this, ImportModal never unmounts between files, so
+  // "Import another file" would keep showing the previous file's result.
+  const [importSessionId, setImportSessionId] = useState(0);
+
+  // Dark mode: toggled by class on <html>. Defaults to LIGHT regardless of
+  // OS preference — only an explicit prior choice (stored in localStorage)
+  // will start the app in dark mode.
+  // IMPORTANT: tailwind.config.js must have `darkMode: 'class'` set, or the
+  // `dark:` classes throughout this app will never take effect no matter
+  // what class is on <html>.
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    const prefersDark = window.matchMedia?.(
-      "(prefers-color-scheme: dark)",
-    ).matches;
     const stored = localStorage.getItem("theme");
-    const shouldUseDark = stored ? stored === "dark" : prefersDark;
+    const shouldUseDark = stored === "dark";
     setIsDark(shouldUseDark);
     document.documentElement.classList.toggle("dark", shouldUseDark);
   }, []);
@@ -58,8 +66,8 @@ export default function CsvImporterPage() {
     Papa.parse<CsvRow>(selected, {
       header: true,
       skipEmptyLines: true,
-      complete: (results: any) => {
-        const parsedRows = (results.data || []).filter((row: any) =>
+      complete: (results) => {
+        const parsedRows = (results.data || []).filter((row) =>
           Object.values(row).some((v) => String(v ?? "").trim() !== ""),
         );
         const detectedColumns =
@@ -68,8 +76,9 @@ export default function CsvImporterPage() {
         setRows(parsedRows);
         setIsParsing(false);
         setModalOpen(true);
+        setImportSessionId((id) => id + 1);
       },
-      error: (err: any) => {
+      error: (err) => {
         setParseError(err.message || "Failed to parse CSV file.");
         setColumns([]);
         setRows([]);
@@ -105,6 +114,7 @@ export default function CsvImporterPage() {
     setFileName("");
     setColumns([]);
     setRows([]);
+    setImportSessionId((id) => id + 1);
   }, []);
 
   return (
@@ -207,6 +217,7 @@ export default function CsvImporterPage() {
       </div>
 
       <ImportModal
+        key={importSessionId}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onReset={resetAll}

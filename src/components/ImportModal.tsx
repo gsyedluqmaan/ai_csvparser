@@ -9,6 +9,7 @@ import {
   Download,
   Loader2,
   RotateCw,
+  Clock,
 } from "lucide-react";
 
 export type CsvRow = Record<string, string>;
@@ -54,10 +55,16 @@ type ImportProgress = {
 
 type ModalStage = "preview" | "importing" | "result";
 
+// const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://ai-csvparser-backend.onrender.com";
 const AI_FAILURE_PREFIX = "AI processing failed:";
+const RATE_LIMIT_MARKER = "rate limit reached";
+
+function isRateLimitReason(reason: string) {
+  return reason.toLowerCase().includes(RATE_LIMIT_MARKER);
+}
 
 const IMPORTED_COLUMNS: { key: keyof ImportedRecord; label: string }[] = [
   { key: "created_at", label: "Created At" },
@@ -138,6 +145,7 @@ async function consumeSseStream(
       totalBatches: number;
       batchSize: number;
       error?: string;
+      isRateLimit?: boolean;
     }) => void;
     onResult?: (data: ImportApiResponse) => void;
     onError?: (data: { message: string }) => void;
@@ -176,7 +184,13 @@ async function consumeSseStream(
   }
 }
 
-function ProgressPanel({ progress }: { progress: ImportProgress | null }) {
+function ProgressPanel({
+  progress,
+  rateLimitHit,
+}: {
+  progress: ImportProgress | null;
+  rateLimitHit: boolean;
+}) {
   return (
     <motion.div
       key="progress-panel"
@@ -186,25 +200,35 @@ function ProgressPanel({ progress }: { progress: ImportProgress | null }) {
       className="flex h-full flex-col items-center justify-center gap-5 py-16 sm:py-24"
     >
       <motion.div
-        animate={{ rotate: 360 }}
+        animate={rateLimitHit ? {} : { rotate: 360 }}
         transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-        className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 ring-1 ring-emerald-100 dark:bg-emerald-500/10 dark:ring-emerald-500/20"
+        className={`flex h-12 w-12 items-center justify-center rounded-full ring-1 ${
+          rateLimitHit
+            ? "bg-amber-50 ring-amber-100 dark:bg-amber-500/10 dark:ring-amber-500/20"
+            : "bg-emerald-50 ring-emerald-100 dark:bg-emerald-500/10 dark:ring-emerald-500/20"
+        }`}
       >
-        <Loader2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+        {rateLimitHit ? (
+          <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+        ) : (
+          <Loader2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+        )}
       </motion.div>
 
       <div className="text-center px-4">
         <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-          Mapping your data with AI…
+          {rateLimitHit ? "AI limit reached" : "Mapping your data with AI…"}
         </p>
         <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-          {progress
-            ? `Batch ${progress.currentBatch} of ${progress.totalBatches} · ${progress.batchSize} rows per batch`
-            : "Starting up…"}
+          {rateLimitHit
+            ? "Try again after some time — remaining rows have been marked as skipped."
+            : progress
+              ? `Batch ${progress.currentBatch} of ${progress.totalBatches} · ${progress.batchSize} rows per batch`
+              : "Starting up…"}
         </p>
       </div>
 
-      {progress && (
+      {progress && !rateLimitHit && (
         <div className="w-full max-w-xs px-4">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <motion.div
@@ -227,36 +251,6 @@ function ProgressPanel({ progress }: { progress: ImportProgress | null }) {
         </div>
       )}
     </motion.div>
-  );
-}
-
-function StatChip({
-  label,
-  value,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: number;
-  tone: "neutral" | "success" | "warning";
-  icon?: React.ReactNode;
-}) {
-  const toneStyles = {
-    neutral:
-      "bg-slate-50 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
-    success:
-      "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20",
-    warning:
-      "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20",
-  }[tone];
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ring-1 ${toneStyles}`}
-    >
-      {icon}
-      {label}: <span className="font-semibold">{value}</span>
-    </span>
   );
 }
 
@@ -285,6 +279,7 @@ export default function ImportModal({
   );
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [rateLimitHit, setRateLimitHit] = useState(false);
 
   const closeModal = useCallback(() => {
     if (stage === "importing" || isRetrying) return; // don't close mid-request
@@ -312,6 +307,7 @@ export default function ImportModal({
     setStage("importing");
     setImportError("");
     setProgress(null);
+    setRateLimitHit(false);
 
     try {
       const formData = new FormData();
@@ -327,7 +323,8 @@ export default function ImportModal({
             completedBatches: 0,
             failedBatches: 0,
           }),
-        onProgress: (data) =>
+        onProgress: (data) => {
+          if (data.isRateLimit) setRateLimitHit(true);
           setProgress((prev) => {
             const base = prev ?? {
               totalBatches: data.totalBatches,
@@ -348,7 +345,8 @@ export default function ImportModal({
                   ? base.failedBatches + 1
                   : base.failedBatches,
             };
-          }),
+          });
+        },
         onResult: (data) => {
           setResult(data);
           setResultView("imported");
@@ -381,6 +379,7 @@ export default function ImportModal({
     setIsRetrying(true);
     setImportError("");
     setProgress(null);
+    setRateLimitHit(false);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/import/retry`, {
@@ -407,7 +406,8 @@ export default function ImportModal({
             completedBatches: 0,
             failedBatches: 0,
           }),
-        onProgress: (data) =>
+        onProgress: (data) => {
+          if (data.isRateLimit) setRateLimitHit(true);
           setProgress((prev) => {
             const base = prev ?? {
               totalBatches: data.totalBatches,
@@ -428,7 +428,8 @@ export default function ImportModal({
                   ? base.failedBatches + 1
                   : base.failedBatches,
             };
-          }),
+          });
+        },
         onResult: (retryData) => {
           setResult((prev) => {
             if (!prev) return prev;
@@ -460,9 +461,14 @@ export default function ImportModal({
     }
   }, [result]);
 
-  const failedCount =
-    result?.skipped.filter((item) => item.reason.startsWith(AI_FAILURE_PREFIX))
-      .length ?? 0;
+  const failedItems =
+    result?.skipped.filter((item) =>
+      item.reason.startsWith(AI_FAILURE_PREFIX),
+    ) ?? [];
+  const failedCount = failedItems.length;
+  const failedAreAllRateLimit =
+    failedCount > 0 &&
+    failedItems.every((item) => isRateLimitReason(item.reason));
 
   return (
     <AnimatePresence>
@@ -569,7 +575,12 @@ export default function ImportModal({
                   </motion.div>
                 )}
 
-                {stage === "importing" && <ProgressPanel progress={progress} />}
+                {stage === "importing" && (
+                  <ProgressPanel
+                    progress={progress}
+                    rateLimitHit={rateLimitHit}
+                  />
+                )}
 
                 {stage === "result" && result && (
                   <motion.div
@@ -581,7 +592,10 @@ export default function ImportModal({
                     className="flex h-full flex-col"
                   >
                     {isRetrying ? (
-                      <ProgressPanel progress={progress} />
+                      <ProgressPanel
+                        progress={progress}
+                        rateLimitHit={rateLimitHit}
+                      />
                     ) : (
                       <>
                         {importError && (
@@ -591,8 +605,17 @@ export default function ImportModal({
                           </div>
                         )}
 
+                        {failedAreAllRateLimit && (
+                          <div className="mx-4 mt-4 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 ring-1 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20 sm:mx-6">
+                            <Clock className="h-4 w-4 shrink-0" />
+                            AI limit reached for {failedCount} row
+                            {failedCount === 1 ? "" : "s"} — try again after
+                            some time.
+                          </div>
+                        )}
+
                         <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 sm:mx-6">
-                          <div className="inline-flex w-fit rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800 sm:mx-6">
+                          <div className="inline-flex w-fit rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
                             {(["imported", "skipped"] as const).map((v) => (
                               <button
                                 key={v}
@@ -614,10 +637,19 @@ export default function ImportModal({
                             {failedCount > 0 && (
                               <button
                                 onClick={handleRetryFailed}
+                                title={
+                                  failedAreAllRateLimit
+                                    ? "AI limit reached — wait a bit before retrying"
+                                    : undefined
+                                }
                                 className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 transition hover:bg-amber-100 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
                               >
-                                <RotateCw className="h-3.5 w-3.5" /> Retry{" "}
-                                {failedCount} failed
+                                {failedAreAllRateLimit ? (
+                                  <Clock className="h-3.5 w-3.5" />
+                                ) : (
+                                  <RotateCw className="h-3.5 w-3.5" />
+                                )}
+                                Retry {failedCount} failed
                               </button>
                             )}
                             <button
@@ -722,35 +754,50 @@ export default function ImportModal({
                               </thead>
                               <tbody>
                                 {result.skipped.length ? (
-                                  result.skipped.map((item, i) => (
-                                    <tr
-                                      key={i}
-                                      className="odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900 dark:even:bg-slate-800/30"
-                                    >
-                                      <td className="border-b border-slate-50 px-4 py-2.5 align-top dark:border-slate-800/60">
-                                        <span
-                                          className={`inline-flex items-center gap-1 text-xs font-medium ${
-                                            item.reason.startsWith(
-                                              AI_FAILURE_PREFIX,
-                                            )
-                                              ? "text-rose-600 dark:text-rose-400"
-                                              : "text-amber-700 dark:text-amber-400"
-                                          }`}
-                                        >
-                                          <AlertCircle className="h-3 w-3" />{" "}
-                                          {item.reason}
-                                        </span>
-                                      </td>
-                                      <td className="border-b border-slate-50 px-4 py-2.5 align-top dark:border-slate-800/60">
-                                        <div
-                                          className="truncate font-mono text-xs text-slate-400 dark:text-slate-500"
-                                          title={JSON.stringify(item.original)}
-                                        >
-                                          {JSON.stringify(item.original)}
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))
+                                  result.skipped.map((item, i) => {
+                                    const rateLimited = isRateLimitReason(
+                                      item.reason,
+                                    );
+                                    return (
+                                      <tr
+                                        key={i}
+                                        className="odd:bg-white even:bg-slate-50/50 dark:odd:bg-slate-900 dark:even:bg-slate-800/30"
+                                      >
+                                        <td className="border-b border-slate-50 px-4 py-2.5 align-top dark:border-slate-800/60">
+                                          <span
+                                            className={`inline-flex items-center gap-1 text-xs font-medium ${
+                                              rateLimited
+                                                ? "text-amber-700 dark:text-amber-400"
+                                                : item.reason.startsWith(
+                                                      AI_FAILURE_PREFIX,
+                                                    )
+                                                  ? "text-rose-600 dark:text-rose-400"
+                                                  : "text-slate-600 dark:text-slate-400"
+                                            }`}
+                                          >
+                                            {rateLimited ? (
+                                              <Clock className="h-3 w-3" />
+                                            ) : (
+                                              <AlertCircle className="h-3 w-3" />
+                                            )}
+                                            {rateLimited
+                                              ? "AI limit reached — try again after some time"
+                                              : item.reason}
+                                          </span>
+                                        </td>
+                                        <td className="border-b border-slate-50 px-4 py-2.5 align-top dark:border-slate-800/60">
+                                          <div
+                                            className="truncate font-mono text-xs text-slate-400 dark:text-slate-500"
+                                            title={JSON.stringify(
+                                              item.original,
+                                            )}
+                                          >
+                                            {JSON.stringify(item.original)}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })
                                 ) : (
                                   <tr>
                                     <td
